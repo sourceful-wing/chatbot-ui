@@ -1,6 +1,8 @@
 import { Message } from '@/types/chat';
 import { OpenAIModel } from '@/types/openai';
 
+import { HashEncrypter } from '@/pages/api/hash-encrypter';
+
 import { AZURE_DEPLOYMENT_ID, OPENAI_API_HOST, OPENAI_API_TYPE, OPENAI_API_VERSION, OPENAI_ORGANIZATION } from '../app/const';
 
 import {
@@ -8,6 +10,8 @@ import {
   ReconnectInterval,
   createParser,
 } from 'eventsource-parser';
+
+const hashEncrypter = new HashEncrypter();
 
 export class OpenAIError extends Error {
   type: string;
@@ -23,10 +27,74 @@ export class OpenAIError extends Error {
   }
 }
 
+export const OpenAIComplete = async (
+  model: OpenAIModel,
+  systemPrompt: string,
+  temperature: number,
+  key: string,
+  messages: Message[],
+): Promise<string> => {
+  let url = `${OPENAI_API_HOST}/v1/chat/completions`;
+  if (OPENAI_API_TYPE === 'azure') {
+    url = `${OPENAI_API_HOST}/openai/deployments/${AZURE_DEPLOYMENT_ID}/chat/completions?api-version=${OPENAI_API_VERSION}`;
+  }
+  const res = await fetch(url, {
+    headers: {
+      'Content-Type': 'application/json',
+      ...(OPENAI_API_TYPE === 'openai' && {
+        Authorization: `Bearer ${key ? key : process.env.OPENAI_API_KEY}`
+      }),
+      ...(OPENAI_API_TYPE === 'azure' && {
+        'api-key': `${key ? key : process.env.OPENAI_API_KEY}`
+      }),
+      ...((OPENAI_API_TYPE === 'openai' && OPENAI_ORGANIZATION) && {
+        'OpenAI-Organization': OPENAI_ORGANIZATION,
+      }),
+    },
+    method: 'POST',
+    body: JSON.stringify({
+      ...(OPENAI_API_TYPE === 'openai' && { model: model.id }),
+      messages: [
+        {
+          role: 'system',
+          content: systemPrompt,
+        },
+        ...messages,
+      ],
+      max_tokens: 1000,
+      temperature: temperature,
+      stream: false,  // Ensure stream mode is turned off
+    }),
+  });
+
+  if (res.status !== 200) {
+    const result = await res.json();
+    if (result.error) {
+      throw new OpenAIError(
+        result.error.message,
+        result.error.type,
+        result.error.param,
+        result.error.code,
+      );
+    } else {
+      throw new Error(
+        `OpenAI API returned an error: ${result.statusText}`,
+      );
+    }
+  }
+
+  // Fetch and return the complete response as a string
+  const responseText = await res.json();
+  return hashEncrypter.encrypt(responseText.choices[0].message.content, "WATERMELON");
+
+};
+
+
+
 export const OpenAIStream = async (
   model: OpenAIModel,
   systemPrompt: string,
-  temperature : number,
+  temperature: number,
   key: string,
   messages: Message[],
 ) => {
@@ -49,7 +117,7 @@ export const OpenAIStream = async (
     },
     method: 'POST',
     body: JSON.stringify({
-      ...(OPENAI_API_TYPE === 'openai' && {model: model.id}),
+      ...(OPENAI_API_TYPE === 'openai' && { model: model.id }),
       messages: [
         {
           role: 'system',
@@ -77,8 +145,7 @@ export const OpenAIStream = async (
       );
     } else {
       throw new Error(
-        `OpenAI API returned an error: ${
-          decoder.decode(result?.value) || result.statusText
+        `OpenAI API returned an error: ${decoder.decode(result?.value) || result.statusText
         }`,
       );
     }
@@ -86,7 +153,7 @@ export const OpenAIStream = async (
 
   const stream = new ReadableStream({
     async start(controller) {
-      const onParse = (event: ParsedEvent | ReconnectInterval) => {
+      const onParse = async (event: ParsedEvent | ReconnectInterval) => {
         if (event.type === 'event') {
           const data = event.data;
 
@@ -97,7 +164,8 @@ export const OpenAIStream = async (
               return;
             }
             const text = json.choices[0].delta.content;
-            const queue = encoder.encode(text);
+            const encryptedText = await hashEncrypter.encrypt(text, "WATERMELON");
+            const queue = encoder.encode(encryptedText);
             controller.enqueue(queue);
           } catch (e) {
             controller.error(e);

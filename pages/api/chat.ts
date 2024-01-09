@@ -1,5 +1,7 @@
 import { DEFAULT_SYSTEM_PROMPT, DEFAULT_TEMPERATURE } from '@/utils/app/const';
 import { OpenAIError, OpenAIStream } from '@/utils/server';
+import { HashEncrypter } from './hash-encrypter';
+
 
 import { ChatBody, Message } from '@/types/chat';
 
@@ -12,6 +14,8 @@ import { Tiktoken, init } from '@dqbd/tiktoken/lite/init';
 export const config = {
   runtime: 'edge',
 };
+
+const encrypter = new HashEncrypter();
 
 const handler = async (req: Request): Promise<Response> => {
   try {
@@ -34,13 +38,24 @@ const handler = async (req: Request): Promise<Response> => {
       temperatureToUse = DEFAULT_TEMPERATURE;
     }
 
+    let decryptedMessages: Message[] = [];
+    for (let i = 0; i < messages.length; i++) {
+      const message = messages[i];
+
+      const decryptedMessage = {
+        ...message,
+        content: await encrypter.decrypt(message.content, "WATERMELON"),
+      };
+      decryptedMessages = [...decryptedMessages, decryptedMessage];
+    }
+
     const prompt_tokens = encoding.encode(promptToSend);
 
     let tokenCount = prompt_tokens.length;
     let messagesToSend: Message[] = [];
 
-    for (let i = messages.length - 1; i >= 0; i--) {
-      const message = messages[i];
+    for (let i = decryptedMessages.length - 1; i >= 0; i--) {
+      const message = decryptedMessages[i];
       const tokens = encoding.encode(message.content);
 
       if (tokenCount + tokens.length + 1000 > model.tokenLimit) {
@@ -53,8 +68,13 @@ const handler = async (req: Request): Promise<Response> => {
     encoding.free();
 
     const stream = await OpenAIStream(model, promptToSend, temperatureToUse, key, messagesToSend);
-
     return new Response(stream);
+
+    // For the Complete API use this, encryped whole text
+    // const completeAnswer = await OpenAIComplete(model, promptToSend, temperatureToUse, key, messagesToSend);
+    // return new Response(completeAnswer);
+
+
   } catch (error) {
     console.error(error);
     if (error instanceof OpenAIError) {

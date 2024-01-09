@@ -23,20 +23,23 @@ import { throttle } from '@/utils/data/throttle';
 import { ChatBody, Conversation, Message } from '@/types/chat';
 import { Plugin } from '@/types/plugin';
 
+import { HashEncrypter } from '@/pages/api/hash-encrypter';
 import HomeContext from '@/pages/api/home/home.context';
 
 import Spinner from '../Spinner';
 import { ChatInput } from './ChatInput';
 import { ChatLoader } from './ChatLoader';
 import { ErrorMessageDiv } from './ErrorMessageDiv';
+import { MemoizedChatMessage } from './MemoizedChatMessage';
 import { ModelSelect } from './ModelSelect';
 import { SystemPrompt } from './SystemPrompt';
 import { TemperatureSlider } from './Temperature';
-import { MemoizedChatMessage } from './MemoizedChatMessage';
 
 interface Props {
   stopConversationRef: MutableRefObject<boolean>;
 }
+
+const hashEncrypter = new HashEncrypter();
 
 export const Chat = memo(({ stopConversationRef }: Props) => {
   const { t } = useTranslation('chat');
@@ -93,9 +96,25 @@ export const Chat = memo(({ stopConversationRef }: Props) => {
         });
         homeDispatch({ field: 'loading', value: true });
         homeDispatch({ field: 'messageIsStreaming', value: true });
+
+        // Encrypt each of the message.content in updatedConversation.messages
+
+        const encryptedMessages = await Promise.all(
+          updatedConversation.messages.map(async (message) => {
+            const encryptedContent = await hashEncrypter.encrypt(
+              message.content,
+              'WATERMELON',
+            );
+            return {
+              ...message,
+              content: encryptedContent,
+            };
+          }),
+        );
+
         const chatBody: ChatBody = {
           model: updatedConversation.model,
-          messages: updatedConversation.messages,
+          messages: encryptedMessages,
           key: apiKey,
           prompt: updatedConversation.prompt,
           temperature: updatedConversation.temperature,
@@ -161,12 +180,17 @@ export const Chat = memo(({ stopConversationRef }: Props) => {
             const { value, done: doneReading } = await reader.read();
             done = doneReading;
             const chunkValue = decoder.decode(value);
-            text += chunkValue;
+            const decryptedContent = await hashEncrypter.decrypt(
+              chunkValue,
+              'WATERMELON',
+            );
+
+            text += decryptedContent;
             if (isFirst) {
               isFirst = false;
               const updatedMessages: Message[] = [
                 ...updatedConversation.messages,
-                { role: 'assistant', content: chunkValue },
+                { role: 'assistant', content: decryptedContent },
               ];
               updatedConversation = {
                 ...updatedConversation,
@@ -177,8 +201,8 @@ export const Chat = memo(({ stopConversationRef }: Props) => {
                 value: updatedConversation,
               });
             } else {
-              const updatedMessages: Message[] =
-                updatedConversation.messages.map((message, index) => {
+              const updatedMessages: Message[] = await Promise.all(
+                updatedConversation.messages.map(async (message, index) => {
                   if (index === updatedConversation.messages.length - 1) {
                     return {
                       ...message,
@@ -186,7 +210,9 @@ export const Chat = memo(({ stopConversationRef }: Props) => {
                     };
                   }
                   return message;
-                });
+                }),
+              );
+
               updatedConversation = {
                 ...updatedConversation,
                 messages: updatedMessages,
@@ -306,14 +332,6 @@ export const Chat = memo(({ stopConversationRef }: Props) => {
     }
   };
   const throttledScrollDown = throttle(scrollDown, 250);
-
-  // useEffect(() => {
-  //   console.log('currentMessage', currentMessage);
-  //   if (currentMessage) {
-  //     handleSend(currentMessage);
-  //     homeDispatch({ field: 'currentMessage', value: undefined });
-  //   }
-  // }, [currentMessage]);
 
   useEffect(() => {
     throttledScrollDown();

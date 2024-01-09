@@ -12,6 +12,8 @@ export enum OpenAIModelID {
   GPT_3_5_AZ = 'gpt-35-turbo',
   GPT_4 = 'gpt-4',
   GPT_4_32K = 'gpt-4-32k',
+  MIXTRAL = './dolphin-2.5-mixtral-8x7b.Q4_K_M.gguf',
+  YI = './dolphin-2.2-yi-34b-200k.Q4_K_M.gguf',
 }
 
 // in case the `DEFAULT_MODEL` environment variable is not set or set to an unsupported model
@@ -41,5 +43,17 @@ export const OpenAIModels: Record<OpenAIModelID, OpenAIModel> = {
     name: 'GPT-4-32K',
     maxLength: 96000,
     tokenLimit: 32000,
+  },
+  [OpenAIModelID.MIXTRAL]: {
+    id: OpenAIModelID.MIXTRAL,
+    name: 'MIXTRAL',
+    maxLength: 96000,
+    tokenLimit: 32000,
+  },
+  [OpenAIModelID.YI]: {
+    id: OpenAIModelID.YI,
+    name: 'YI',
+    maxLength: 96000,
+    tokenLimit: 200000,
   },
 };
